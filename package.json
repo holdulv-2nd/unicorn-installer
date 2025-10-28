@@ -25,10 +25,9 @@
       "**/*"
     ],
     "mac": {
-      "target": [
-        "dmg"
-      ],
-      "icon": "icon.png"
+    "target": ["dmg"],
+    "icon": "icon.png",
+    "identity": null
     },
     "win": {
       "target": [
