@@ -1,0 +1,49 @@
+{
+  "name": "unicorn-installer",
+  "version": "1.0.0",
+  "description": "Shine Unicorn cross-platform installer",
+  "main": "main.js",
+  "author": "Your Name <youremail@example.com>",
+  "homepage": "https://yourwebsite.com",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "release": "standard-version && git push --follow-tags origin main"
+  },
+  "devDependencies": {
+    "electron": "^26.0.0",
+    "electron-builder": "^24.0.0",
+    "standard-version": "^9.5.0"
+  },
+  "build": {
+    "appId": "io.qzz.fiana.unicorninstaller",
+    "productName": "Shine Unicorn Installer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "icon.png"
+    },
+    "win": {
+      "target": [
+        "msi",
+        "nsis"
+      ],
+      "icon": "icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "icon.png",
+      "category": "Utility"
+    }
+  }
+}
