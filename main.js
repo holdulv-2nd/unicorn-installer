@@ -12,14 +12,14 @@ const shineCode = fs.readFileSync(path.join(__dirname, 'shine.js'), 'utf-8');
 
 function createWindow() {
     const win = new BrowserWindow({
-    width: 550,
-    height: 450,
-    resizable: false,
-    autoHideMenuBar: true, // Hides menu and prevents it from toggling with Alt
-    menuBarVisible: false, // Ensures menu is not shown at all
-    webPreferences: { nodeIntegration: true, contextIsolation: false },
-    icon: path.join(__dirname, 'icon.png')
-});
+        width: 550,
+        height: 450,
+        resizable: false,
+        autoHideMenuBar: true,
+        menuBarVisible: false,
+        webPreferences: { nodeIntegration: true, contextIsolation: false },
+        icon: path.join(__dirname, 'icon.png')
+    });
     win.loadFile('index.html');
 }
 
@@ -32,6 +32,50 @@ function isAdmin() {
         catch { return false; }
     } else {
         return process.getuid && process.getuid() === 0;
+    }
+}
+
+function addToPath(installPath) {
+    if (platform === 'win32') {
+        try {
+            // Add to user PATH on Windows
+            const currentPath = execSync('powershell -Command "[Environment]::GetEnvironmentVariable(\'Path\', \'User\')"', { encoding: 'utf-8' }).trim();
+            if (!currentPath.includes(installPath)) {
+                const newPath = currentPath ? `${currentPath};${installPath}` : installPath;
+                execSync(`powershell -Command "[Environment]::SetEnvironmentVariable('Path', '${newPath.replace(/'/g, "''")}', 'User')"`);
+                // Broadcast environment change
+                execSync('powershell -Command "& {[System.Environment]::SetEnvironmentVariable(\'Dummy\', \'Value\', \'User\'); Remove-Item Env:\\Dummy}"');
+            }
+        } catch (err) {
+            console.error('Failed to add to PATH:', err);
+        }
+    } else if (platform === 'darwin') {
+        // Add to .zshrc and .bash_profile for macOS
+        const shells = ['.zshrc', '.bash_profile'];
+        shells.forEach(shell => {
+            const shellPath = path.join(homeDir, shell);
+            const exportLine = `\nexport PATH="$PATH:${installPath}"\n`;
+            try {
+                let content = fs.existsSync(shellPath) ? fs.readFileSync(shellPath, 'utf-8') : '';
+                if (!content.includes(installPath)) {
+                    fs.appendFileSync(shellPath, exportLine);
+                }
+            } catch (err) {
+                console.error(`Failed to update ${shell}:`, err);
+            }
+        });
+    } else if (platform === 'linux') {
+        // Add to .bashrc for Linux
+        const bashrc = path.join(homeDir, '.bashrc');
+        const exportLine = `\nexport PATH="$PATH:${installPath}"\n`;
+        try {
+            let content = fs.existsSync(bashrc) ? fs.readFileSync(bashrc, 'utf-8') : '';
+            if (!content.includes(installPath)) {
+                fs.appendFileSync(bashrc, exportLine);
+            }
+        } catch (err) {
+            console.error('Failed to update .bashrc:', err);
+        }
     }
 }
 
@@ -91,8 +135,20 @@ ipcMain.handle('install-shine', async (event, installPath) => {
 
         makeTerminalWrapper(runnerPath, targetPath);
         associateFiles(targetPath);
+        
+        // Add to PATH if not installing to system directory
+        if (!admin || platform === 'win32') {
+            addToPath(targetPath);
+        }
 
-        return { success: true, message: `✨ Shine installed successfully at ${targetPath}! ✨` };
+        let pathMsg = '';
+        if (platform === 'win32') {
+            pathMsg = '\n\n⚠️ Please restart your terminal or log out and back in for PATH changes to take effect.';
+        } else if (platform === 'darwin' || platform === 'linux') {
+            pathMsg = '\n\n⚠️ Please restart your terminal or run: source ~/.zshrc (or ~/.bashrc)';
+        }
+
+        return { success: true, message: `✨ Shine installed successfully at ${targetPath}! ✨${pathMsg}` };
     } catch (err) {
         return { success: false, message: err.message };
     }

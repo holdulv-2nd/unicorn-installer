@@ -39,7 +39,7 @@ function runUnicorn(code) {
 // ================= UPDATE FUNCTIONS ================= //
 
 const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
-const CURRENT_VERSION = '1.0.0';
+const CURRENT_VERSION = '1.0.3';
 
 function checkUpdate() {
     return new Promise((resolve, reject) => {
