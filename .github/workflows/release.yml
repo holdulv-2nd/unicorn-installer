@@ -3,10 +3,10 @@ name: Build & Release Unicorn Installer
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags like v1.1.4
+      - 'v*.*.*'  # Trigger on version tags like v7.0.1
 
 permissions:
-  contents: write  # Needed to create releases and upload artifacts
+  contents: write  # Required to create releases and upload artifacts
 
 jobs:
   build-and-release:
@@ -15,10 +15,10 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         node: [20.x]
-      fail-fast: false  # Keep other OS builds even if one fails
+      fail-fast: false  # Continue builds even if one fails
 
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # PAT with repo scope for private repos
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # Personal Access Token with repo scope
 
     steps:
       - name: Checkout repository
@@ -35,16 +35,25 @@ jobs:
       - name: Build Electron App
         run: npm run dist
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}  # ensures Electron Builder can access GH
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      # Zip macOS app so GitHub can upload it
+      - name: Zip macOS .app bundle
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist/mac-arm64
+          zip -r "Shine Unicorn Installer-mac.zip" "Shine Unicorn Installer.app"
 
       - name: Create GitHub Release and attach artifacts
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: Unicorn Installer ${{ github.ref_name }}
-          artifacts: "dist/**/*"
+          # Upload files only, not directories
+          artifacts: |
+            dist/**/*.{zip,deb,AppImage,msi,exe}
           generateReleaseNotes: false
           immutableCreate: false
           makeLatest: legacy
         env:
-          token: ${{ secrets.GH_TOKEN }}  # Must be your PAT for private repo
+          token: ${{ secrets.GH_TOKEN }}
