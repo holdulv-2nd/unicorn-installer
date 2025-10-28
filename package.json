@@ -24,6 +24,7 @@
     "files": [
       "**/*"
     ],
+    "publish": null,
     "mac": {
       "target": [
         "dmg"
