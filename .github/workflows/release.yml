@@ -3,7 +3,10 @@ name: Build & Release Unicorn Installer
 on:
   push:
     tags:
-      - 'v*.*.*'   # Trigger on version tags like v1.0.0
+      - 'v*.*.*'  # Trigger on version tags like v1.1.4
+
+permissions:
+  contents: write  # Needed to create releases and upload artifacts
 
 jobs:
   build-and-release:
@@ -12,6 +15,10 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         node: [20.x]
+      fail-fast: false  # Keep other OS builds even if one fails
+
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # PAT with repo scope for private repos
 
     steps:
       - name: Checkout repository
@@ -27,13 +34,17 @@ jobs:
 
       - name: Build Electron App
         run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}  # ensures Electron Builder can access GH
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release and attach artifacts
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: Unicorn Installer ${{ github.ref_name }}
           artifacts: "dist/**/*"
-          overwrite: true
+          generateReleaseNotes: false
+          immutableCreate: false
+          makeLatest: legacy
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}  # Must be your PAT for private repo
