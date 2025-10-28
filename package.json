@@ -1,10 +1,10 @@
 {
   "name": "unicorn-installer",
-  "version": "1.1.6",
+  "version": "1.0.0",
   "description": "Shine Unicorn cross-platform installer",
   "main": "main.js",
-  "author": "Your Name <youremail@example.com>",
-  "homepage": "https://yourwebsite.com",
+  "author": "Fiana-dev <hello@fiana.qzz.io>",
+  "homepage": "https://fiana.qzz.io",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",

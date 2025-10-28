@@ -3,64 +3,96 @@ name: Build & Release Unicorn Installer
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags like v7.0.3
+      - 'v*.*.*'
 
 permissions:
-  contents: write  # Required to create releases and upload artifacts
+  contents: write
 
 jobs:
-  build-and-release:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Unicorn Installer ${{ github.ref_name }}
+          skipIfReleaseExists: true
+          makeLatest: legacy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-upload:
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         node: [20.x]
-      fail-fast: false  # Continue other builds even if one fails
-
+      fail-fast: false
+    
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
-
+      
       - name: Install dependencies
         run: npm install
-
+      
       - name: Build Electron App
         run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
-      # Zip macOS app so GitHub can upload it
-      - name: Zip macOS .app bundle
-        if: matrix.os == 'macos-latest'
-        run: |
-          cd dist/mac-arm64
-          zip -r "Shine Unicorn Installer-mac.zip" "Shine Unicorn Installer.app"
-
-      # Upload artifacts to GitHub Release
-      - name: Create GitHub Release and attach artifacts
+      
+      # Upload Windows artifacts
+      - name: Upload Windows artifacts
+        if: matrix.os == 'windows-latest'
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
-          name: Unicorn Installer ${{ github.ref_name }}
           artifacts: |
-            # Windows
-            dist/**/*.msi
-            dist/**/*.exe
-            # Linux
-            dist/**/*.AppImage
-            dist/**/*.deb
-            # Mac
-            dist/mac-arm64/*.zip
-          generateReleaseNotes: false
-          immutableCreate: false
-          makeLatest: legacy
+            dist/*.exe
+            dist/*.msi
+          allowUpdates: true
+          omitBody: true
+          omitName: true
+          makeLatest: false
         env:
-          token: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Upload Linux artifacts
+      - name: Upload Linux artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          artifacts: |
+            dist/*.AppImage
+            dist/*.deb
+          allowUpdates: true
+          omitBody: true
+          omitName: true
+          makeLatest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Upload macOS artifacts
+      - name: Upload macOS artifacts
+        if: matrix.os == 'macos-latest'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          artifacts: dist/*.dmg
+          allowUpdates: true
+          omitBody: true
+          omitName: true
+          makeLatest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
