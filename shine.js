@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
+const { spawn } = require('child_process');
 
 function runUnicorn(code) {
     try {
@@ -34,12 +36,113 @@ function runUnicorn(code) {
     }
 }
 
+// ================= UPDATE FUNCTIONS ================= //
+
+const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
+const CURRENT_VERSION = '1.0.0';
+
+function checkUpdate() {
+    return new Promise((resolve, reject) => {
+        https.get(`${REPFAL_BASE}/latest.json`, res => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    resolve(json);
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }).on('error', err => reject(err));
+    });
+}
+
+function downloadFile(url, dest) {
+    return new Promise((resolve, reject) => {
+        https.get(url, res => {
+            const total = parseInt(res.headers['content-length'], 10);
+            let downloaded = 0;
+
+            const file = fs.createWriteStream(dest);
+            res.on('data', chunk => {
+                file.write(chunk);
+                downloaded += chunk.length;
+
+                const percent = Math.floor((downloaded / total) * 20);
+                const bar = '✨'.repeat(percent) + '-'.repeat(20 - percent);
+                process.stdout.write(`\r[${bar}] ${Math.floor((downloaded / total) * 100)}%`);
+            });
+
+            res.on('end', () => {
+                file.close();
+                console.log('\n🌟 Download complete! 🌟');
+                resolve();
+            });
+
+            res.on('error', err => {
+                file.close();
+                reject(err);
+            });
+        });
+    });
+}
+
+async function shineUpdate() {
+    try {
+        const latest = await checkUpdate();
+        if (latest.version === CURRENT_VERSION) {
+            console.log('🦄 You are already on the latest version!');
+            return;
+        }
+
+        console.log(`🌈 New version detected: ${latest.version}`);
+        const platform = process.platform === 'win32' ? 'win-x64' :
+                         process.platform === 'darwin' ? 'mac-arm64' :
+                         'linux-x64';
+        const fileUrl = latest.files[platform];
+        if (!fileUrl) {
+            console.error('❌ No update available for your platform.');
+            return;
+        }
+
+        const fileName = path.basename(fileUrl);
+        const destPath = path.join(process.cwd(), fileName);
+
+        // Remove any old installer for same platform
+        fs.readdirSync(process.cwd()).forEach(file => {
+            if (file.includes('Shine.Unicorn.Installer') && file !== fileName) {
+                fs.unlinkSync(path.join(process.cwd(), file));
+                console.log(`🧹 Removed old installer: ${file}`);
+            }
+        });
+
+        console.log(`✨ Downloading ${fileName} ...`);
+        await downloadFile(`${REPFAL_BASE}${fileUrl}`, destPath);
+
+        console.log('🦄 Update ready! You can now run the new installer.');
+
+    } catch (err) {
+        console.error('❌ Update failed:', err.message);
+    }
+}
+
+// ================= MAIN FUNCTION ================= //
+
 function main() {
-    const file = process.argv[2];
+    const arg = process.argv[2];
+
+    if (arg === 'update') {
+        shineUpdate();
+        return;
+    }
+
+    const file = arg;
     if (!file) {
-        console.log("🦄 Usage: shine <file.unicorn>");
+        console.log("🦄 Usage: shine <file.unicorn> or shine update");
         process.exit(1);
     }
+
     const code = fs.readFileSync(path.resolve(file), 'utf-8');
     runUnicorn(code);
 }
