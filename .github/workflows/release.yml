@@ -3,7 +3,7 @@ name: Build & Release Unicorn Installer
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags like v7.0.1
+      - 'v*.*.*'  # Trigger on version tags like v7.0.3
 
 permissions:
   contents: write  # Required to create releases and upload artifacts
@@ -15,10 +15,10 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         node: [20.x]
-      fail-fast: false  # Continue builds even if one fails
+      fail-fast: false  # Continue other builds even if one fails
 
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # Personal Access Token with repo scope
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -44,14 +44,21 @@ jobs:
           cd dist/mac-arm64
           zip -r "Shine Unicorn Installer-mac.zip" "Shine Unicorn Installer.app"
 
+      # Upload artifacts to GitHub Release
       - name: Create GitHub Release and attach artifacts
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: Unicorn Installer ${{ github.ref_name }}
-          # Upload files only, not directories
           artifacts: |
-            dist/**/*.{zip,deb,AppImage,msi,exe}
+            # Windows
+            dist/**/*.msi
+            dist/**/*.exe
+            # Linux
+            dist/**/*.AppImage
+            dist/**/*.deb
+            # Mac
+            dist/mac-arm64/*.zip
           generateReleaseNotes: false
           immutableCreate: false
           makeLatest: legacy
