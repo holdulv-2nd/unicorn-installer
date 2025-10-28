@@ -12,12 +12,14 @@ const shineCode = fs.readFileSync(path.join(__dirname, 'shine.js'), 'utf-8');
 
 function createWindow() {
     const win = new BrowserWindow({
-        width: 550,
-        height: 450,
-        resizable: false,
-        webPreferences: { nodeIntegration: true, contextIsolation: false },
-        icon: path.join(__dirname, 'icon.png')
-    });
+    width: 550,
+    height: 450,
+    resizable: false,
+    autoHideMenuBar: true, // Hides menu and prevents it from toggling with Alt
+    menuBarVisible: false, // Ensures menu is not shown at all
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+    icon: path.join(__dirname, 'icon.png')
+});
     win.loadFile('index.html');
 }
 
