@@ -15,7 +15,6 @@ const hideFlag = process.argv.includes('-hide');
 let autoInstallPath = null;
 
 if (hideFlag) {
-    // Find existing Shine installation
     const possiblePaths = [
         path.join(homeDir, 'Shine'),
         path.join(homeDir, '.shine'),
@@ -48,7 +47,6 @@ function createWindow() {
     
     win.loadFile('index.html');
     
-    // Auto-install if -hide flag is present
     if (hideFlag && autoInstallPath) {
         setTimeout(() => {
             performInstallation(path.dirname(autoInstallPath), win);
@@ -117,11 +115,45 @@ function addToPath(installPath) {
     }
 }
 
+// ⭐ NEW: Bundle Node.js from Electron
+function createNodeWrapper(installPath) {
+    console.log('📦 Bundling Node.js runtime...');
+    
+    try {
+        if (platform === 'win32') {
+            // Windows: Copy electron.exe as node.exe
+            const nodePath = path.join(installPath, 'node.exe');
+            fs.copyFileSync(process.execPath, nodePath);
+            console.log('✅ Node.js bundled successfully (Windows)');
+        } else {
+            // Unix: Create wrapper script
+            const nodePath = path.join(installPath, 'node');
+            const electronPath = process.execPath;
+            
+            // Create a wrapper that executes like node
+            const wrapperScript = `#!/bin/bash
+exec "${electronPath}" "$@"
+`;
+            fs.writeFileSync(nodePath, wrapperScript, { mode: 0o755 });
+            console.log('✅ Node.js wrapper created successfully (Unix)');
+        }
+    } catch (err) {
+        console.error('⚠️  Failed to bundle Node.js:', err.message);
+        console.log('Users will need to install Node.js manually');
+    }
+}
+
 function makeTerminalWrapper(runnerPath, installPath) {
+    const nodePath = path.join(installPath, platform === 'win32' ? 'node.exe' : 'node');
+    
     if (platform === 'win32') {
         const wrapperPath = path.join(installPath, 'shine.cmd');
+        
+        // Check if bundled Node.js exists, otherwise fall back to system node
+        const nodeCommand = fs.existsSync(nodePath) ? `"${nodePath}"` : 'node';
+        
         fs.writeFileSync(wrapperPath, `@echo off
-node "${runnerPath}" %*
+${nodeCommand} "${runnerPath}" %*
 if errorlevel 1 (
     echo.
     echo ✨ Error occurred! Press any key to close ✨
@@ -129,7 +161,13 @@ if errorlevel 1 (
 )
 `);
     } else {
-        fs.chmodSync(runnerPath, 0o755);
+        // Create Unix wrapper
+        const wrapperPath = path.join(installPath, 'shine');
+        const nodeCommand = fs.existsSync(nodePath) ? `"${nodePath}"` : 'node';
+        
+        fs.writeFileSync(wrapperPath, `#!/bin/bash
+${nodeCommand} "${runnerPath}" "$@"
+`, { mode: 0o755 });
     }
 }
 
@@ -146,16 +184,14 @@ function associateFiles(installPath) {
             fs.mkdirSync(path.dirname(desktopFile), { recursive: true });
             fs.writeFileSync(desktopFile, `[Desktop Entry]
 Name=Unicorn Script
-Exec=gnome-terminal -- bash -c "shine %f; echo '✨ Press Enter to close ✨'; read"
+Exec=gnome-terminal -- bash -c "${path.join(installPath, 'shine')} %f; echo 'Press Enter to close'; read"
 Icon=${path.join(__dirname,'icon.png')}
 Type=Application
 MimeType=text/x-unicorn;
 `);
             try {
                 execSync(`update-mime-database ~/.local/share/mime`, { stdio: 'ignore' });
-            } catch (e) {
-                // Ignore if command not available
-            }
+            } catch (e) {}
         }
     } catch (err) {
         console.error('File association failed:', err.message);
@@ -167,16 +203,16 @@ function createPluginsDirectory(installPath) {
     if (!fs.existsSync(pluginsDir)) {
         fs.mkdirSync(pluginsDir, { recursive: true });
         
-        // Create C++ plugin with Windows compiler detection
-        const cppPlugin = `// C++ Plugin for Shine
-const { spawn } = require('child_process');
+        // ========== FIXED C++ PLUGIN ==========
+        const cppPlugin = `// C++ Plugin for Shine v1.0.2
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 module.exports = {
     name: 'cpp-compiler',
-    version: '1.0.1',
+    version: '1.0.2',
     description: 'Compiles and runs C++ files',
     
     init: function() {
@@ -184,6 +220,46 @@ module.exports = {
     },
     
     extensions: ['.cpp', '.cc', '.cxx', '.c'],
+    
+    findCompiler: function() {
+        const platform = process.platform;
+        
+        const compilers = platform === 'win32' 
+            ? ['g++', 'gcc', 'clang++', 'cl']
+            : ['g++', 'gcc', 'clang++', 'c++'];
+        
+        const windowsPaths = [
+            'C:\\\\msys64\\\\mingw64\\\\bin',
+            'C:\\\\msys64\\\\ucrt64\\\\bin',
+            'C:\\\\msys64\\\\mingw32\\\\bin',
+            'C:\\\\MinGW\\\\bin',
+            'C:\\\\TDM-GCC-64\\\\bin',
+            'C:\\\\Program Files\\\\mingw-w64\\\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\\\mingw64\\\\bin',
+        ];
+        
+        for (const compiler of compilers) {
+            try {
+                execSync(\`\${compiler} --version\`, { stdio: 'ignore' });
+                return compiler;
+            } catch (e) {}
+        }
+        
+        if (platform === 'win32') {
+            for (const basePath of windowsPaths) {
+                for (const compiler of ['g++.exe', 'gcc.exe', 'clang++.exe']) {
+                    const fullPath = path.join(basePath, compiler);
+                    try {
+                        if (fs.existsSync(fullPath)) {
+                            fs.accessSync(fullPath, fs.constants.X_OK);
+                            return fullPath;
+                        }
+                    } catch (e) {}
+                }
+            }
+        }
+        
+        return null;
+    },
     
     execute: function(filePath, code) {
         return new Promise((resolve, reject) => {
@@ -196,31 +272,31 @@ module.exports = {
             
             console.log(\`🔨 Compiling \${path.basename(filePath)}...\`);
             
-            const isC = ext === '.c';
-            let compiler = isC ? 'gcc' : 'g++';
+            const compiler = this.findCompiler();
             
-            // Windows compiler detection
-            if (process.platform === 'win32') {
-                // Try common Windows compiler paths
-                const possibleCompilers = [
-                    'g++', 'gcc',
-                    'C:\\\\msys64\\\\mingw64\\\\bin\\\\g++.exe',
-                    'C:\\\\msys64\\\\mingw32\\\\bin\\\\g++.exe', 
-                    'C:\\\\MinGW\\\\bin\\\\g++.exe',
-                    'C:\\\\Program Files\\\\mingw-w64\\\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\\\mingw64\\\\bin\\\\g++.exe'
-                ];
-                
-                for (const comp of possibleCompilers) {
-                    try {
-                        fs.accessSync(comp, fs.constants.X_OK);
-                        compiler = comp;
-                        break;
-                    } catch (e) {
-                        // Try next compiler
-                    }
+            if (!compiler) {
+                console.error('❌ C++ compiler not found!');
+                console.error('');
+                console.error('📥 Please install a C++ compiler:');
+                console.error('');
+                if (process.platform === 'win32') {
+                    console.error('   Windows Options:');
+                    console.error('   1. MSYS2: https://www.msys2.org/ (recommended)');
+                    console.error('      After installing, run: pacman -S mingw-w64-ucrt-x86_64-gcc');
+                    console.error('   2. MinGW-w64: https://www.mingw-w64.org/downloads/');
+                    console.error('   3. Visual Studio: https://visualstudio.microsoft.com/');
+                } else if (process.platform === 'darwin') {
+                    console.error('   macOS: xcode-select --install');
+                } else {
+                    console.error('   Linux:');
+                    console.error('   sudo apt install build-essential    # Ubuntu/Debian');
+                    console.error('   sudo yum groupinstall "Development Tools"  # RHEL/CentOS');
                 }
+                console.error('');
+                return reject(new Error('C++ compiler not found'));
             }
             
+            const isC = ext === '.c';
             const compileArgs = [filePath, '-o', outputFile];
             if (!isC) compileArgs.push('-std=c++17');
             
@@ -262,15 +338,7 @@ module.exports = {
             });
             
             compileProcess.on('error', (err) => {
-                if (err.code === 'ENOENT') {
-                    console.error(\`❌ C++ compiler not found! Please install a C++ compiler.\`);
-                    console.error('   Windows: Install MinGW-w64 from https://www.mingw-w64.org/');
-                    console.error('   Linux: sudo apt install build-essential');
-                    console.error('   macOS: xcode-select --install');
-                    console.error('   Or install Visual Studio with C++ support');
-                } else {
-                    console.error('❌ Compilation error:', err.message);
-                }
+                console.error('❌ Compilation error:', err.message);
                 reject(err);
             });
         });
@@ -279,14 +347,14 @@ module.exports = {
 `;
         fs.writeFileSync(path.join(pluginsDir, 'cpp-plugin.js'), cppPlugin);
         
-        // Create JavaScript plugin
-        const jsPlugin = `// JavaScript Plugin for Shine
+        // ========== FIXED JAVASCRIPT PLUGIN ==========
+        const jsPlugin = `// JavaScript Plugin for Shine v1.0.1
 const fs = require('fs');
 const path = require('path');
 
 module.exports = {
     name: 'javascript-runner',
-    version: '1.0.0',
+    version: '1.0.1',
     description: 'Runs JavaScript files',
     
     init: function() {
@@ -301,17 +369,32 @@ module.exports = {
                 console.log(\`✨ Running JavaScript: \${path.basename(filePath)}\`);
                 console.log('─'.repeat(50));
                 
-                // Execute the JavaScript file
-                const modulePath = require.resolve(filePath);
-                delete require.cache[modulePath];
-                require(filePath);
+                const absolutePath = path.resolve(filePath);
+                const fileDir = path.dirname(absolutePath);
                 
-                console.log('─'.repeat(50));
-                console.log('✨ JavaScript execution completed!');
-                resolve();
+                delete require.cache[absolutePath];
+                
+                const originalCwd = process.cwd();
+                process.chdir(fileDir);
+                
+                try {
+                    require(absolutePath);
+                    
+                    console.log('─'.repeat(50));
+                    console.log('✨ JavaScript execution completed!');
+                    
+                    process.chdir(originalCwd);
+                    resolve();
+                } catch (execError) {
+                    process.chdir(originalCwd);
+                    throw execError;
+                }
             } catch (err) {
+                console.log('─'.repeat(50));
                 console.error('❌ JavaScript error:', err.message);
-                console.error(err.stack);
+                if (err.stack) {
+                    console.error(err.stack);
+                }
                 reject(err);
             }
         });
@@ -324,54 +407,80 @@ module.exports = {
 
 function createReadme(installPath) {
     const readmePath = path.join(installPath, 'README.md');
+    const hasNodeBundle = fs.existsSync(path.join(installPath, platform === 'win32' ? 'node.exe' : 'node'));
+    
     const readmeContent = `# 🦄 Shine - UnicornLang Runner
 
-Welcome to Shine! This is your local installation of the Shine UnicornLang runner.
+Welcome to Shine! Your local installation of the Shine UnicornLang runner.
+
+${hasNodeBundle ? '✅ **Node.js is bundled** - No separate installation required!' : '⚠️ **Note:** Node.js must be installed separately to use Shine.'}
 
 ## 🚀 Quick Start
 
 ### Running UnicornLang Files
-
 \`\`\`bash
 shine myprogram.unicorn
 \`\`\`
 
-### Example UnicornLang Program
-
-Create a file called \`hello.unicorn\`:
-
-\`\`\`unicorn
-twinkle "Hello, World!";
-
-fairy name = "Alice";
-magic age = 25;
-
-rainbow greet(person) {
-    twinkle "Hello, " + person + "!";
-}
-
-greet(name);
+### Running JavaScript Files
+\`\`\`bash
+shine hello.js
 \`\`\`
 
-Run it:
+### Running C++ Files
 \`\`\`bash
-shine hello.unicorn
+shine hello.cpp
+\`\`\`
+
+## ⚙️ Prerequisites
+
+${hasNodeBundle ? '### ✅ JavaScript Runtime\nNode.js is already included with Shine!\n' : '### Node.js\nDownload from https://nodejs.org/\n'}
+
+### For C++ Compilation
+
+**Windows (Choose one):**
+1. **MSYS2** (recommended)
+   - Download: https://www.msys2.org/
+   - After install: \`pacman -S mingw-w64-ucrt-x86_64-gcc\`
+   - Add to PATH: \`C:\\msys64\\ucrt64\\bin\`
+
+2. **MinGW-w64**
+   - Download: https://www.mingw-w64.org/downloads/
+
+3. **Visual Studio**
+   - Install with C++ support
+
+**macOS:**
+\`\`\`bash
+xcode-select --install
+\`\`\`
+
+**Linux:**
+\`\`\`bash
+# Ubuntu/Debian
+sudo apt install build-essential
+
+# RHEL/CentOS/Fedora  
+sudo yum groupinstall "Development Tools"
+
+# Arch
+sudo pacman -S base-devel
 \`\`\`
 
 ## 📚 UnicornLang Syntax
 
 ### Variables
 \`\`\`unicorn
-fairy name = "Alice";         // const - immutable
-magic age = 25;               // let - mutable number
-dragon count = 10;            // let - mutable
-pixie isActive = yes;         // boolean (yes/no)
+fairy name = "Alice";         // const
+magic age = 25;               // let (number)
+dragon count = 10;            // let (any)
+pixie isActive = yes;         // boolean
 pixieDust colors = [1,2,3];   // array
 \`\`\`
 
 ### Output
 \`\`\`unicorn
-twinkle "Hello World";  // Outputs: ✨ Hello World ✨
+twinkle "Hello World";  // ✨ Hello World ✨
 \`\`\`
 
 ### Functions
@@ -384,27 +493,8 @@ magic result = add(5, 10);
 twinkle result;
 \`\`\`
 
-### Classes
-\`\`\`unicorn
-sparkle Person {
-    rainbow init(name, age) {
-        this.name = name;
-        this.age = age;
-    }
-    
-    sayHello() {
-        twinkle "Hi, I'm " + this.name;
-    }
-}
-
-magic person = new Person("Bob", 30);
-person.sayHello();
-\`\`\`
-
 ### Control Flow
 \`\`\`unicorn
-magic age = 20;
-
 if (age >= 18) {
     twinkle "Adult";
 } unless {
@@ -412,161 +502,79 @@ if (age >= 18) {
 }
 \`\`\`
 
-### Error Handling
+### Loops
 \`\`\`unicorn
-try {
-    // Risky code here
-    magic result = 10 / 0;
-} catch (error) {
-    twinkle "An error occurred!";
+repeat 5 times {
+    twinkle "Hello!";
 }
 \`\`\`
 
-## 🔌 Using Plugins
+## 📌 Plugins
 
-Shine supports plugins to run other programming languages!
-
-### List Available Plugins
+### List Plugins
 \`\`\`bash
 shine plugins
 \`\`\`
 
-### Using the C++ Plugin
+### Examples
 
-Create a file called \`hello.cpp\`:
-
+**C++ (test.cpp):**
 \`\`\`cpp
 #include <iostream>
-
 int main() {
-    std::cout << "Hello from C++!" << std::endl;
+    std::cout << "Hello C++!" << std::endl;
     return 0;
 }
 \`\`\`
 
-Run it with Shine:
-\`\`\`bash
-shine hello.cpp
+**JavaScript (hello.js):**
+\`\`\`javascript
+console.log("Hello JavaScript!");
 \`\`\`
 
-Shine will automatically compile and run it!
+Run with: \`shine test.cpp\` or \`shine hello.js\`
 
-## 🔄 Updating Shine
-
-Check for and download updates:
+## 🔄 Updates
 
 \`\`\`bash
 shine update
 \`\`\`
 
-This will download the latest installer. To auto-update:
-
-\`\`\`bash
-./Shine.Unicorn.Installer.Setup.{version}.exe -hide
-\`\`\`
-
-## 📁 Installation Directory
-
-Your Shine installation is located at:
-**${installPath}**
-
-### Directory Structure
-\`\`\`
-${installPath}/
-├── shine.js (or shine)    # Main runner
-├── shine.cmd              # Windows wrapper (Windows only)
-├── plugins/               # Plugin directory
-│   └── cpp-plugin.js
-└── README.md             # This file
-\`\`\`
-
-## 🛠️ Useful Commands
+## 🛠️ Commands
 
 | Command | Description |
 |---------|-------------|
-| \`shine <file>\` | Run a UnicornLang or supported file |
-| \`shine update\` | Check for and download updates |
-| \`shine plugins\` | List all loaded plugins |
-| \`shine help\` | Show help information |
+| \`shine <file>\` | Run a file |
+| \`shine update\` | Check for updates |
+| \`shine plugins\` | List plugins |
+| \`shine help\` | Show help |
 
-## 🐛 Troubleshooting
+## 🛠️ Troubleshooting
 
 ### Command not found: shine
 
 ${platform === 'win32' 
-    ? '**Windows**: Close and reopen your terminal, or restart your computer.'
-    : '**macOS/Linux**: Run \`source ~/.zshrc\` or \`source ~/.bashrc\`'}
-
-### Plugin not working
-
-1. Check that the plugin file exists in the \`plugins\` directory
-2. Run \`shine plugins\` to see if it's loaded
-3. Check the plugin file for syntax errors
+    ? 'Restart your terminal or computer.'
+    : 'Run: \`source ~/.zshrc\` or \`source ~/.bashrc\`'}
 
 ### C++ compilation fails
 
-Make sure you have a C++ compiler installed:
+Install a C++ compiler (see Prerequisites above).
 
-- **Windows**: Install MinGW-w64 or Visual Studio
-- **macOS**: Run \`xcode-select --install\`
-- **Linux**: Run \`sudo apt install build-essential\`
-
-## 💡 Examples
-
-### Calculator
-\`\`\`unicorn
-rainbow calculate(a, b, operation) {
-    if (operation == "add") {
-        return a + b;
-    } unless {
-        if (operation == "multiply") {
-            return a * b;
-        }
-    }
-}
-
-magic result = calculate(10, 5, "add");
-twinkle "Result: " + result;
-\`\`\`
-
-### Person Class
-\`\`\`unicorn
-sparkle Person {
-    rainbow init(name, age) {
-        this.name = name;
-        this.age = age;
-    }
-    
-    introduce() {
-        twinkle "I'm " + this.name + " and I'm " + this.age + " years old";
-    }
-}
-
-magic alice = new Person("Alice", 25);
-alice.introduce();
-\`\`\`
-
-## 🌟 Tips
-
-1. **File Extensions**: UnicornLang files use the \`.unicorn\` extension
-2. **PATH Setup**: Shine is added to your PATH automatically
-3. **File Associations**: Double-click \`.unicorn\` files to run them
-4. **Plugins**: Extend Shine to support any language you want!
-5. **Updates**: Run \`shine update\` regularly to get the latest features
+Test: \`g++ --version\`
 
 ## 📞 Support
 
-For issues, questions, or contributions, visit: https://fiana.qzz.io
+Visit: https://fiana.qzz.io
 
 ---
 
-**Installation Date**: ${new Date().toLocaleString()}
-**Shine Version**: 1.0.4
+**Installation**: ${new Date().toLocaleString()}
+**Version**: 1.0.7
 **Platform**: ${platform}
+${hasNodeBundle ? '**Node.js**: Bundled ✅' : '**Node.js**: External ⚠️'}
 
 Made with ✨ by Fiana-dev
-
-Happy coding! 🦄✨
 `;
 
     fs.writeFileSync(readmePath, readmeContent);
@@ -577,36 +585,46 @@ async function performInstallation(installPath, win) {
     try {
         if (!installPath) throw new Error("No installation path provided");
 
-        // Create Shine directory
         const shinePath = path.join(installPath, 'Shine');
         fs.mkdirSync(shinePath, { recursive: true });
 
-        const runnerPath = path.join(shinePath, platform === 'win32' ? 'shine.js' : 'shine');
-        fs.writeFileSync(runnerPath, shineCode, { mode: 0o755 });
+        console.log('📝 Installing Shine runner...');
+        const runnerPath = path.join(shinePath, 'shine.js');
+        fs.writeFileSync(runnerPath, shineCode);
 
+        // ⭐ Bundle Node.js from Electron
+        createNodeWrapper(shinePath);
+
+        console.log('🔧 Creating wrapper scripts...');
         makeTerminalWrapper(runnerPath, shinePath);
+        
+        console.log('🔗 Setting up file associations...');
         associateFiles(shinePath);
+        
+        console.log('📦 Installing plugins...');
         createPluginsDirectory(shinePath);
         
-        // Create README and get its path
+        console.log('📖 Creating documentation...');
         const readmePath = createReadme(shinePath);
         
+        console.log('🛤️  Adding to PATH...');
         addToPath(shinePath);
 
+        const hasNodeBundle = fs.existsSync(path.join(shinePath, platform === 'win32' ? 'node.exe' : 'node'));
+        
         let pathMsg = '';
         if (platform === 'win32') {
             pathMsg = '\n\n⚠️ Please restart your terminal or log out and back in for PATH changes to take effect.';
-        } else if (platform === 'darwin' || platform === 'linux') {
+        } else {
             pathMsg = '\n\n⚠️ Please restart your terminal or run: source ~/.zshrc (or ~/.bashrc)';
         }
 
-        const message = `✨ Shine installed successfully at ${shinePath}! ✨${pathMsg}`;
+        const message = `✨ Shine installed successfully at ${shinePath}! ✨${hasNodeBundle ? '\n\n✅ Node.js bundled - no separate installation needed!' : '\n\n⚠️ You\'ll need to install Node.js separately.'}${pathMsg}`;
         
         if (hideFlag) {
             console.log(message);
             setTimeout(() => app.quit(), 2000);
         } else {
-            // Send the README path to renderer so it can prompt user
             if (win) {
                 win.webContents.send('installation-complete', { 
                     message, 
@@ -620,13 +638,13 @@ async function performInstallation(installPath, win) {
     } catch (err) {
         const errorMsg = `Installation failed: ${err.message}`;
         console.error(errorMsg);
+        console.error(err.stack);
         return { success: false, message: errorMsg };
     }
 }
 
-// --- IPC from renderer ---
+// --- IPC handlers ---
 ipcMain.handle('get-default-path', async () => {
-    // Suggest default installation path
     if (platform === 'win32') {
         return path.join(homeDir, 'AppData', 'Local');
     } else {

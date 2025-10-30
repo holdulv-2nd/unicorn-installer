@@ -5,7 +5,7 @@ const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
 
-const CURRENT_VERSION = '1.0.6';
+const CURRENT_VERSION = '1.0.7';
 const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
 
 // Plugin system
@@ -35,10 +35,7 @@ function loadPlugins() {
 
 function runUnicorn(code) {
     try {
-        // More robust transpilation with better pattern matching
         let jsCode = code;
-        
-        // Comments (keep as is for now)
         
         // Basic output - handle both quoted strings and variables
         jsCode = jsCode.replace(/twinkle\s+([^;]+);/g, 'console.log("✨ " + $1 + " ✨");');
@@ -58,27 +55,28 @@ function runUnicorn(code) {
         jsCode = jsCode.replace(/sparkle\s+(\w+)\s*\{/g, 'class $1 {');
         jsCode = jsCode.replace(/rainbow\s+init\s*\(([^)]*)\)\s*\{/g, 'constructor($1) {');
         
-        // Control structures - simplified
-        jsCode = jsCode.replace(/unless\s*\{/g, '} else {');
+        // FIXED: Handle if-unless pattern properly
+        // First, handle if-unless together as a single pattern
+        jsCode = jsCode.replace(/if\s*\(([^)]+)\)\s*\{([^}]*)\}\s*unless\s*\{([^}]*)\}/g, 
+            'if ($1) {$2} else {$3}');
         
-        // Simple if-else handling
-        const ifElseRegex = /if\s*\(([^)]+)\)\s*\{([^}]*)\}\s*unless\s*\{([^}]*)\}/g;
-        jsCode = jsCode.replace(ifElseRegex, 'if ($1) {$2} else {$3}');
+        // Then handle standalone if statements
+        jsCode = jsCode.replace(/if\s*\(([^)]+)\)\s*\{/g, 'if ($1) {');
         
-        // Simple if handling
-        const ifRegex = /if\s*\(([^)]+)\)\s*\{([^}]*)\}/g;
-        jsCode = jsCode.replace(ifRegex, 'if ($1) {$2}');
+        // Handle standalone unless as else
+        jsCode = jsCode.replace(/unless\s*\{/g, 'else {');
         
         // Error handling
-        jsCode = jsCode.replace(/try\s*\{([^}]*)\}\s*catch\s*\(([^)]+)\)\s*\{([^}]*)\}/g, 'try {$1} catch($2) {$3}');
+        jsCode = jsCode.replace(/try\s*\{([^}]*)\}\s*catch\s*\(([^)]+)\)\s*\{([^}]*)\}/g, 
+            'try {$1} catch($2) {$3}');
         
-        // Simple loops (basic support)
-        jsCode = jsCode.replace(/repeat\s+(\d+)\s+times\s*\{([^}]*)\}/g, 'for (let i = 0; i < $1; i++) {$2}');
+        // Simple loops
+        jsCode = jsCode.replace(/repeat\s+(\d+)\s+times\s*\{/g, 'for (let i = 0; i < $1; i++) {');
         
-        // Equality check
+        // Equality check - use 'is' instead of 'is' to avoid conflicts
         jsCode = jsCode.replace(/\bis\b/g, '===');
         
-        console.log('🔧 Transpiled Code:', jsCode); // Debug output
+        console.log('🔧 Transpiled Code:', jsCode);
         
         eval(jsCode);
     } catch (err) {
@@ -126,7 +124,6 @@ function downloadFile(url, dest) {
     return new Promise((resolve, reject) => {
         const request = https.get(url, res => {
             if (res.statusCode === 302 || res.statusCode === 301) {
-                // Handle redirect
                 console.log(`🔀 Redirecting to: ${res.headers.location}`);
                 return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
             }
@@ -182,7 +179,6 @@ async function shineUpdate() {
         console.log('🔍 Checking for updates...');
         const latest = await checkUpdate();
         
-        // Normalize version format (remove 'v' prefix if present)
         const currentVersion = CURRENT_VERSION.replace(/^v/, '');
         const latestVersion = latest.version.replace(/^v/, '');
         
@@ -193,7 +189,6 @@ async function shineUpdate() {
 
         console.log(`🌈 New version detected: ${latestVersion} (current: ${currentVersion})`);
         
-        // Better platform detection
         let platformFile;
         const platform = process.platform;
         
@@ -211,10 +206,8 @@ async function shineUpdate() {
             return;
         }
 
-        // Ensure the file URL uses the correct version
         let fileName = `Shine.Unicorn.Installer.Setup.${latestVersion}`;
         
-        // Add correct file extension
         if (platform === 'win32') {
             fileName += '.exe';
         } else if (platform === 'darwin') {
@@ -227,7 +220,6 @@ async function shineUpdate() {
 
         const destPath = path.join(process.cwd(), fileName);
 
-        // Clean up old installers
         try {
             const files = fs.readdirSync(process.cwd());
             files.forEach(file => {
@@ -235,9 +227,7 @@ async function shineUpdate() {
                     try {
                         fs.unlinkSync(path.join(process.cwd(), file));
                         console.log(`🧹 Removed old installer: ${file}`);
-                    } catch (e) {
-                        // Ignore if file is in use
-                    }
+                    } catch (e) {}
                 }
             });
         } catch (err) {
@@ -249,7 +239,6 @@ async function shineUpdate() {
         
         await downloadFile(`${REPFAL_BASE}${platformFile}`, destPath);
 
-        // Verify the downloaded file
         try {
             const stats = fs.statSync(destPath);
             if (stats.size === 0) {
@@ -290,12 +279,16 @@ function showHelp() {
 
 Usage:
   shine <file.unicorn>     Run a UnicornLang file
+  shine <file.js>          Run a JavaScript file (if plugin loaded)
+  shine <file.cpp>         Compile and run C++ file (if plugin loaded)
   shine update             Check and download updates
   shine help               Show this help message
   shine plugins            List loaded plugins
 
 Examples:
   shine myprogram.unicorn
+  shine hello.js
+  shine test.cpp
   shine update
     `);
 }
@@ -348,7 +341,7 @@ function main() {
         // Try plugin execution first
         const pluginUsed = executeWithPlugin(file, code);
         if (pluginUsed !== false) {
-            return; // Plugin handled execution
+            return;
         }
         
         // Fall back to UnicornLang for .unicorn files
