@@ -2,20 +2,229 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Unicorn Installer 🦄</title>
+<title>Shine Unicorn Installer 🦄</title>
 <style>
-    body { font-family: sans-serif; text-align: center; padding: 50px; background: #f0eaff; }
-    h1 { color: #9b59b6; }
-    button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+    
+    body { 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        color: #333;
+    }
+    
+    .container {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        padding: 40px;
+        width: 500px;
+        max-width: 90%;
+    }
+    
+    h1 {
+        color: #667eea;
+        text-align: center;
+        margin-bottom: 10px;
+        font-size: 28px;
+    }
+    
+    .subtitle {
+        text-align: center;
+        color: #666;
+        margin-bottom: 30px;
+        font-size: 14px;
+    }
+    
+    .section {
+        margin-bottom: 25px;
+    }
+    
+    .label {
+        display: block;
+        margin-bottom: 8px;
+        color: #555;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
+    .path-display {
+        background: #f5f5f5;
+        padding: 12px;
+        border-radius: 8px;
+        border: 2px solid #e0e0e0;
+        min-height: 45px;
+        display: flex;
+        align-items: center;
+        color: #666;
+        font-size: 13px;
+        margin-bottom: 10px;
+        word-break: break-all;
+    }
+    
+    .path-display.has-path {
+        border-color: #667eea;
+        background: #f0f4ff;
+    }
+    
+    button {
+        width: 100%;
+        padding: 14px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        border: none;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        margin-bottom: 10px;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    }
+    
+    .btn-primary:active {
+        transform: translateY(0);
+    }
+    
+    .btn-secondary {
+        background: white;
+        color: #667eea;
+        border: 2px solid #667eea;
+    }
+    
+    .btn-secondary:hover {
+        background: #f0f4ff;
+    }
+    
+    button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none !important;
+    }
+    
+    .status {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        font-size: 14px;
+        display: none;
+    }
+    
+    .status.show {
+        display: block;
+    }
+    
+    .status.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    
+    .status.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .status.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+    
+    .info-box {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        padding: 12px;
+        border-radius: 8px;
+        margin-top: 15px;
+        font-size: 13px;
+        color: #856404;
+    }
+    
+    .completion-actions {
+        margin-top: 20px;
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .completion-actions.show {
+        display: flex;
+    }
+    
+    .completion-actions button {
+        margin-bottom: 0;
+    }
+    
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #667eea;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        animation: spin 1s linear infinite;
+        margin: 10px auto;
+        display: none;
+    }
+    
+    .spinner.show {
+        display: block;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
 </style>
 </head>
 <body>
-<h1>Unicorn Installer 🦄✨</h1>
-<p>Select installation folder for Shine:</p>
-<button id="pickPath">Pick Folder</button>
-<p id="pathDisplay"></p>
-<button id="install">Install Shine</button>
-<p id="status"></p>
+<div class="container">
+    <h1>Shine Unicorn Installer 🦄✨</h1>
+    <p class="subtitle">Install Shine UnicornLang Runner</p>
+    
+    <div class="section">
+        <label class="label">Installation Location:</label>
+        <div class="path-display" id="pathDisplay">
+            Click "Browse" to select installation location
+        </div>
+        <button class="btn-secondary" id="pickPath">📁 Browse Location</button>
+    </div>
+    
+    <div class="section">
+        <button class="btn-primary" id="install" disabled>
+            🚀 Install Shine
+        </button>
+    </div>
+    
+    <div class="spinner" id="spinner"></div>
+    <div class="status" id="status"></div>
+    
+    <div class="completion-actions" id="completionActions">
+        <button class="btn-secondary" id="openReadme">📖 Read Getting Started Guide</button>
+        <button class="btn-secondary" id="openFolder">📁 Open Installation Folder</button>
+    </div>
+    
+    <div class="info-box">
+        💡 <strong>Tip:</strong> Shine will be installed in a "Shine" folder at your selected location. 
+        The installer will automatically set up PATH and file associations.
+    </div>
+</div>
 
 <script src="renderer.js"></script>
 </body>
