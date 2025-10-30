@@ -176,7 +176,7 @@ const os = require('os');
 
 module.exports = {
     name: 'cpp-compiler',
-    version: '1.0.0',
+    version: '1.0.1',
     description: 'Compiles and runs C++ files',
     
     init: function() {

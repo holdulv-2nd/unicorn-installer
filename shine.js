@@ -5,7 +5,7 @@ const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
 
-const CURRENT_VERSION = '1.0.4';
+const CURRENT_VERSION = '1.0.6';
 const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
 
 // Plugin system
@@ -124,10 +124,16 @@ function checkUpdate() {
 
 function downloadFile(url, dest) {
     return new Promise((resolve, reject) => {
-        https.get(url, res => {
+        const request = https.get(url, res => {
             if (res.statusCode === 302 || res.statusCode === 301) {
                 // Handle redirect
+                console.log(`🔀 Redirecting to: ${res.headers.location}`);
                 return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
+            }
+            
+            if (res.statusCode !== 200) {
+                reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+                return;
             }
             
             const total = parseInt(res.headers['content-length'], 10);
@@ -147,17 +153,27 @@ function downloadFile(url, dest) {
             });
 
             res.on('end', () => {
-                file.close();
+                file.end();
                 console.log('\n🌟 Download complete! 🌟');
                 resolve();
             });
 
             res.on('error', err => {
-                file.close();
-                fs.unlinkSync(dest);
+                file.end();
+                try { fs.unlinkSync(dest); } catch (e) {}
+                reject(err);
+            });
+            
+            file.on('error', err => {
+                try { fs.unlinkSync(dest); } catch (e) {}
                 reject(err);
             });
         }).on('error', err => reject(err));
+        
+        request.setTimeout(30000, () => {
+            request.destroy();
+            reject(new Error('Download timeout'));
+        });
     });
 }
 
@@ -166,24 +182,49 @@ async function shineUpdate() {
         console.log('🔍 Checking for updates...');
         const latest = await checkUpdate();
         
-        if (latest.version === CURRENT_VERSION) {
+        // Normalize version format (remove 'v' prefix if present)
+        const currentVersion = CURRENT_VERSION.replace(/^v/, '');
+        const latestVersion = latest.version.replace(/^v/, '');
+        
+        if (latestVersion === currentVersion) {
             console.log('🦄 You are already on the latest version!');
             return;
         }
 
-        console.log(`🌈 New version detected: ${latest.version} (current: ${CURRENT_VERSION})`);
+        console.log(`🌈 New version detected: ${latestVersion} (current: ${currentVersion})`);
         
-        const platform = process.platform === 'win32' ? 'win-x64' :
-                         process.platform === 'darwin' ? 'mac-arm64' :
-                         'linux-x64';
+        // Better platform detection
+        let platformFile;
+        const platform = process.platform;
         
-        const fileUrl = latest.files[platform];
-        if (!fileUrl) {
+        if (platform === 'win32') {
+            platformFile = latest.files['win-x64'] || latest.files['windows'] || latest.files['exe'];
+        } else if (platform === 'darwin') {
+            platformFile = latest.files['mac-arm64'] || latest.files['mac-x64'] || latest.files['dmg'];
+        } else {
+            platformFile = latest.files['linux-x64'] || latest.files['appimage'] || latest.files['deb'];
+        }
+        
+        if (!platformFile) {
             console.error('❌ No update available for your platform.');
+            console.log('Available files:', Object.keys(latest.files));
             return;
         }
 
-        const fileName = `Shine.Unicorn.Installer.Setup.${latest.version}${path.extname(fileUrl)}`;
+        // Ensure the file URL uses the correct version
+        let fileName = `Shine.Unicorn.Installer.Setup.${latestVersion}`;
+        
+        // Add correct file extension
+        if (platform === 'win32') {
+            fileName += '.exe';
+        } else if (platform === 'darwin') {
+            fileName += '.dmg';
+        } else if (platformFile.includes('.deb')) {
+            fileName += '.deb';
+        } else {
+            fileName += '.AppImage';
+        }
+
         const destPath = path.join(process.cwd(), fileName);
 
         // Clean up old installers
@@ -204,15 +245,39 @@ async function shineUpdate() {
         }
 
         console.log(`✨ Downloading ${fileName}...`);
-        await downloadFile(`${REPFAL_BASE}${fileUrl}`, destPath);
+        console.log(`📥 From: ${REPFAL_BASE}${platformFile}`);
+        
+        await downloadFile(`${REPFAL_BASE}${platformFile}`, destPath);
+
+        // Verify the downloaded file
+        try {
+            const stats = fs.statSync(destPath);
+            if (stats.size === 0) {
+                throw new Error('Downloaded file is empty');
+            }
+            console.log(`✅ File verified: ${stats.size} bytes`);
+        } catch (err) {
+            console.error('❌ Downloaded file is invalid:', err.message);
+            try { fs.unlinkSync(destPath); } catch (e) {}
+            throw err;
+        }
 
         console.log('🦄 Update downloaded successfully!');
         console.log(`📦 File: ${destPath}`);
-        console.log('\n💡 To auto-update to this location, run:');
-        console.log(`   ${destPath} -hide`);
+        
+        if (platform === 'win32') {
+            console.log('\n💡 To install the update:');
+            console.log(`   ${destPath}`);
+            console.log('\n💡 To auto-update (silent install):');
+            console.log(`   "${destPath}" -hide`);
+        } else {
+            console.log('\n💡 To install the update:');
+            console.log(`   chmod +x "${destPath}" && "${destPath}"`);
+        }
 
     } catch (err) {
         console.error('❌ Update failed:', err.message);
+        console.log('💡 You may need to update manually contact support');
         process.exit(1);
     }
 }

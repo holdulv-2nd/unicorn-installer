@@ -1,6 +1,6 @@
 {
   "name": "unicorn-installer",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Shine Unicorn cross-platform installer with plugin support",
   "main": "main.js",
   "author": "Fiana-dev <hello@fiana.qzz.io>",
