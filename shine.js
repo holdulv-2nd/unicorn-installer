@@ -35,43 +35,52 @@ function loadPlugins() {
 
 function runUnicorn(code) {
     try {
-        code = code
-            // Basic output
-            .replace(/twinkle\s+"([^"]+)";/g, 'console.log("✨ $1 ✨");')
-            
-            // Variables
-            .replace(/fairy\s+(\w+)\s*=\s*([^;]+);/g, 'const $1 = $2;')
-            .replace(/magic\s+(\w+)\s*=\s*([^;]+);/g, 'let $1 = $2;')
-            .replace(/unicorn\s+(\w+)\s*=\s*"([^"]*)";/g, 'let $1 = "$2";')
-            .replace(/dragon\s+(\w+)\s*=\s*([^;]+);/g, 'let $1 = $2;')
-            .replace(/pixie\s+(\w+)\s*=\s*(yes|no);/g, 'let $1 = $2 === "yes";')
-            .replace(/pixieDust\s+(\w+)\s*=\s*\[([^\]]*)\];/g, 'let $1 = [$2];')
-            
-            // Control structures
-            .replace(/if\s*\(([^)]+)\)\s*{([^}]+)}(?:\s*unless\s*{([^}]+)})?/gs, (match, cond, ifBlock, elseBlock) => {
-                let result = `if (${cond}) {${ifBlock}}`;
-                if (elseBlock) result += ` else {${elseBlock}}`;
-                return result;
-            })
-            
-            // Functions
-            .replace(/rainbow\s+(\w+)\(([^)]*)\)\s*{([^}]*)}/gs, 'function $1($2) {$3}')
-            
-            // Classes
-            .replace(/sparkle\s+(\w+)\s*{([^}]*)}/gs, (match, name, body) => {
-                const constructor = body.match(/rainbow init\(([^)]*)\)\s*{([^}]*)}/s);
-                const methods = body.replace(/rainbow init\([^)]*\)\s*{[^}]*}/s, '');
-                if (constructor) {
-                    return `class ${name} { constructor(${constructor[1]}) {${constructor[2]}} ${methods.replace(/rainbow/g, '')} }`;
-                }
-                return `class ${name} { ${methods.replace(/rainbow/g, '')} }`;
-            })
-            
-            // Error handling
-            .replace(/try\s*{([^}]*)}\s*catch\s*\((\w+)\)\s*{([^}]*)}/gs, 'try {$1} catch($2) {$3}')
-            .replace(/try\s*{([^}]*)}\s*catch\s*\((\w+)\)\s*{([^}]*)}\s*finally\s*{([^}]*)}/gs, 'try {$1} catch($2) {$3} finally {$4}');
+        // More robust transpilation with better pattern matching
+        let jsCode = code;
         
-        eval(code);
+        // Comments (keep as is for now)
+        
+        // Basic output - handle both quoted strings and variables
+        jsCode = jsCode.replace(/twinkle\s+([^;]+);/g, 'console.log("✨ " + $1 + " ✨");');
+        
+        // Variables - handle different types
+        jsCode = jsCode.replace(/fairy\s+(\w+)\s*=\s*([^;]+);/g, 'const $1 = $2;');
+        jsCode = jsCode.replace(/magic\s+(\w+)\s*=\s*([^;]+);/g, 'let $1 = $2;');
+        jsCode = jsCode.replace(/unicorn\s+(\w+)\s*=\s*"([^"]*)";/g, 'let $1 = "$2";');
+        jsCode = jsCode.replace(/dragon\s+(\w+)\s*=\s*([^;]+);/g, 'let $1 = $2;');
+        jsCode = jsCode.replace(/pixie\s+(\w+)\s*=\s*(yes|no);/g, 'let $1 = $2 === "yes";');
+        jsCode = jsCode.replace(/pixieDust\s+(\w+)\s*=\s*\[([^\]]*)\];/g, 'let $1 = [$2];');
+        
+        // Functions
+        jsCode = jsCode.replace(/rainbow\s+(\w+)\s*\(([^)]*)\)\s*\{/g, 'function $1($2) {');
+        
+        // Classes - simplified approach
+        jsCode = jsCode.replace(/sparkle\s+(\w+)\s*\{/g, 'class $1 {');
+        jsCode = jsCode.replace(/rainbow\s+init\s*\(([^)]*)\)\s*\{/g, 'constructor($1) {');
+        
+        // Control structures - simplified
+        jsCode = jsCode.replace(/unless\s*\{/g, '} else {');
+        
+        // Simple if-else handling
+        const ifElseRegex = /if\s*\(([^)]+)\)\s*\{([^}]*)\}\s*unless\s*\{([^}]*)\}/g;
+        jsCode = jsCode.replace(ifElseRegex, 'if ($1) {$2} else {$3}');
+        
+        // Simple if handling
+        const ifRegex = /if\s*\(([^)]+)\)\s*\{([^}]*)\}/g;
+        jsCode = jsCode.replace(ifRegex, 'if ($1) {$2}');
+        
+        // Error handling
+        jsCode = jsCode.replace(/try\s*\{([^}]*)\}\s*catch\s*\(([^)]+)\)\s*\{([^}]*)\}/g, 'try {$1} catch($2) {$3}');
+        
+        // Simple loops (basic support)
+        jsCode = jsCode.replace(/repeat\s+(\d+)\s+times\s*\{([^}]*)\}/g, 'for (let i = 0; i < $1; i++) {$2}');
+        
+        // Equality check
+        jsCode = jsCode.replace(/\bis\b/g, '===');
+        
+        console.log('🔧 Transpiled Code:', jsCode); // Debug output
+        
+        eval(jsCode);
     } catch (err) {
         console.error("🦄 UnicornLang Error:", err.message);
         console.error(err.stack);
@@ -80,10 +89,10 @@ function runUnicorn(code) {
 }
 
 function executeWithPlugin(filePath, code) {
-    const ext = path.extname(filePath);
+    const ext = path.extname(filePath).toLowerCase();
     
     for (const plugin of plugins) {
-        if (plugin.extensions && plugin.extensions.includes(ext)) {
+        if (plugin.extensions && plugin.extensions.some(e => e.toLowerCase() === ext)) {
             if (plugin.execute) {
                 console.log(`✨ Using plugin: ${plugin.name}`);
                 return plugin.execute(filePath, code);
@@ -272,15 +281,18 @@ function main() {
         const code = fs.readFileSync(path.resolve(file), 'utf-8');
         
         // Try plugin execution first
-        if (!executeWithPlugin(file, code)) {
-            // Fall back to UnicornLang
-            if (path.extname(file) === '.unicorn') {
-                runUnicorn(code);
-            } else {
-                console.error(`❌ Unsupported file type: ${path.extname(file)}`);
-                console.log('💡 Install a plugin or use .unicorn files');
-                process.exit(1);
-            }
+        const pluginUsed = executeWithPlugin(file, code);
+        if (pluginUsed !== false) {
+            return; // Plugin handled execution
+        }
+        
+        // Fall back to UnicornLang for .unicorn files
+        if (path.extname(file).toLowerCase() === '.unicorn') {
+            runUnicorn(code);
+        } else {
+            console.error(`❌ Unsupported file type: ${path.extname(file)}`);
+            console.log('💡 Install a plugin or use .unicorn files');
+            process.exit(1);
         }
     } catch (err) {
         console.error('❌ Execution error:', err.message);

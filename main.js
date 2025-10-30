@@ -167,7 +167,7 @@ function createPluginsDirectory(installPath) {
     if (!fs.existsSync(pluginsDir)) {
         fs.mkdirSync(pluginsDir, { recursive: true });
         
-        // Create C++ plugin
+        // Create C++ plugin with Windows compiler detection
         const cppPlugin = `// C++ Plugin for Shine
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -197,7 +197,30 @@ module.exports = {
             console.log(\`🔨 Compiling \${path.basename(filePath)}...\`);
             
             const isC = ext === '.c';
-            const compiler = isC ? 'gcc' : 'g++';
+            let compiler = isC ? 'gcc' : 'g++';
+            
+            // Windows compiler detection
+            if (process.platform === 'win32') {
+                // Try common Windows compiler paths
+                const possibleCompilers = [
+                    'g++', 'gcc',
+                    'C:\\\\msys64\\\\mingw64\\\\bin\\\\g++.exe',
+                    'C:\\\\msys64\\\\mingw32\\\\bin\\\\g++.exe', 
+                    'C:\\\\MinGW\\\\bin\\\\g++.exe',
+                    'C:\\\\Program Files\\\\mingw-w64\\\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\\\mingw64\\\\bin\\\\g++.exe'
+                ];
+                
+                for (const comp of possibleCompilers) {
+                    try {
+                        fs.accessSync(comp, fs.constants.X_OK);
+                        compiler = comp;
+                        break;
+                    } catch (e) {
+                        // Try next compiler
+                    }
+                }
+            }
+            
             const compileArgs = [filePath, '-o', outputFile];
             if (!isC) compileArgs.push('-std=c++17');
             
@@ -240,10 +263,11 @@ module.exports = {
             
             compileProcess.on('error', (err) => {
                 if (err.code === 'ENOENT') {
-                    console.error(\`❌ \${compiler} not found! Please install a C++ compiler.\`);
-                    console.error('   Windows: Install MinGW or Visual Studio');
+                    console.error(\`❌ C++ compiler not found! Please install a C++ compiler.\`);
+                    console.error('   Windows: Install MinGW-w64 from https://www.mingw-w64.org/');
                     console.error('   Linux: sudo apt install build-essential');
                     console.error('   macOS: xcode-select --install');
+                    console.error('   Or install Visual Studio with C++ support');
                 } else {
                     console.error('❌ Compilation error:', err.message);
                 }
@@ -254,6 +278,47 @@ module.exports = {
 };
 `;
         fs.writeFileSync(path.join(pluginsDir, 'cpp-plugin.js'), cppPlugin);
+        
+        // Create JavaScript plugin
+        const jsPlugin = `// JavaScript Plugin for Shine
+const fs = require('fs');
+const path = require('path');
+
+module.exports = {
+    name: 'javascript-runner',
+    version: '1.0.0',
+    description: 'Runs JavaScript files',
+    
+    init: function() {
+        console.log('✨ JavaScript plugin loaded!');
+    },
+    
+    extensions: ['.js'],
+    
+    execute: function(filePath, code) {
+        return new Promise((resolve, reject) => {
+            try {
+                console.log(\`✨ Running JavaScript: \${path.basename(filePath)}\`);
+                console.log('─'.repeat(50));
+                
+                // Execute the JavaScript file
+                const modulePath = require.resolve(filePath);
+                delete require.cache[modulePath];
+                require(filePath);
+                
+                console.log('─'.repeat(50));
+                console.log('✨ JavaScript execution completed!');
+                resolve();
+            } catch (err) {
+                console.error('❌ JavaScript error:', err.message);
+                console.error(err.stack);
+                reject(err);
+            }
+        });
+    }
+};
+`;
+        fs.writeFileSync(path.join(pluginsDir, 'js-plugin.js'), jsPlugin);
     }
 }
 
