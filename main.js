@@ -148,7 +148,7 @@ function copyElectronApp(installPath) {
     try {
         const electronAppPath = process.execPath;
         const electronDir = path.dirname(electronAppPath);
-        const targetDir = path.join(installPath, 'node'); // Renamed from 'electron' to 'node'
+        const targetDir = path.join(installPath, 'node');
         
         // Create target directory
         fs.mkdirSync(targetDir, { recursive: true });
@@ -215,14 +215,15 @@ function copyElectronApp(installPath) {
     }
 }
 
-// ⭐ UPDATED: Terminal wrapper to use bundled node
+// ⭐ UPDATED: Terminal wrapper to use bundled node with proper flags
 function makeTerminalWrapper(runnerPath, installPath, nodeDir) {
     const nodePath = path.join(nodeDir, platform === 'win32' ? 'node.exe' : 'node');
     
     if (platform === 'win32') {
-        const wrapperPath = path.join(installPath, 'shine.cmd');
-        
-        fs.writeFileSync(wrapperPath, `@echo off
+        // Create shine.cmd wrapper (for Shine CLI)
+        const shineCmdPath = path.join(installPath, 'shine.cmd');
+        fs.writeFileSync(shineCmdPath, `@echo off
+set ELECTRON_RUN_AS_NODE=1
 "${nodePath}" "${runnerPath}" %*
 if errorlevel 1 (
     echo.
@@ -230,12 +231,50 @@ if errorlevel 1 (
     pause >nul
 )
 `);
-    } else {
-        // Create Unix wrapper
-        const wrapperPath = path.join(installPath, 'shine');
+
+        // Create node.cmd wrapper (for general Node.js/Electron use)
+        const nodeCmdPath = path.join(installPath, 'node.cmd');
+        fs.writeFileSync(nodeCmdPath, `@echo off
+REM General purpose node/electron wrapper
+REM Use: node script.js (runs as Node.js)
+REM Use: electron app/ (runs as Electron app)
+if "%1"=="" (
+    echo Usage: node script.js
+    echo    or: electron app_folder
+    exit /b 1
+)
+"${nodePath}" %*
+`);
+
+        // Create electron.cmd wrapper (for Electron apps)
+        const electronCmdPath = path.join(installPath, 'electron.cmd');
+        fs.writeFileSync(electronCmdPath, `@echo off
+REM Electron app launcher
+"${nodePath}" %*
+`);
         
-        fs.writeFileSync(wrapperPath, `#!/bin/bash
+    } else {
+        // Create shine wrapper (for Shine CLI)
+        const shineWrapperPath = path.join(installPath, 'shine');
+        fs.writeFileSync(shineWrapperPath, `#!/bin/bash
+export ELECTRON_RUN_AS_NODE=1
 "${nodePath}" "${runnerPath}" "$@"
+`, { mode: 0o755 });
+
+        // Create node wrapper (for general Node.js use)
+        const nodeWrapperPath = path.join(installPath, 'node-runner');
+        fs.writeFileSync(nodeWrapperPath, `#!/bin/bash
+# General purpose node/electron wrapper
+# Use with ELECTRON_RUN_AS_NODE=1 for Node.js mode
+# Use without for Electron app mode
+"${nodePath}" "$@"
+`, { mode: 0o755 });
+
+        // Create electron wrapper (for Electron apps)
+        const electronWrapperPath = path.join(installPath, 'electron');
+        fs.writeFileSync(electronWrapperPath, `#!/bin/bash
+# Electron app launcher
+"${nodePath}" "$@"
 `, { mode: 0o755 });
     }
 }
@@ -501,9 +540,35 @@ shine hello.js
 shine hello.cpp
 \`\`\`
 
+## 🎯 Using the Bundled Runtime
+
+Shine includes a bundled Electron/Node.js runtime. You can use it for:
+
+### For Shine (default)
+\`\`\`bash
+shine script.unicorn
+\`\`\`
+
+### For Electron Apps
+\`\`\`bash
+${platform === 'win32' ? 'electron' : 'electron'} path/to/electron-app
+\`\`\`
+
+### For Node.js Scripts (as Node.js runtime)
+\`\`\`bash
+${platform === 'win32' ? 'node' : 'ELECTRON_RUN_AS_NODE=1 node-runner'} script.js
+\`\`\`
+
+### For Pure Electron Apps (GUI mode)
+\`\`\`bash
+${platform === 'win32' ? 'electron' : 'electron'} .
+\`\`\`
+
+**Note:** The bundled runtime can run both Node.js scripts (with ELECTRON_RUN_AS_NODE=1) and full Electron GUI applications.
+
 ## ⚙️ Prerequisites
 
-${hasFullNode ? '### ✅ Runtime Environment\nNode.js runtime is already included with Shine! No additional dependencies needed.\n' : '### Node.js Runtime\nUsing system Node.js installation.\n'}
+${hasFullNode ? '### ✅ Runtime Environment\nNode.js/Electron runtime is already included with Shine! No additional dependencies needed.\n' : '### Node.js Runtime\nUsing system Node.js installation.\n'}
 
 ### For C++ Compilation
 
@@ -619,6 +684,28 @@ This will automatically download and install the latest version!
 | \`shine update\` | Check and install updates |
 | \`shine plugins\` | List plugins |
 | \`shine help\` | Show help |
+| \`electron <app>\` | Run an Electron app |
+| \`node <script>\` | Run a Node.js script |
+
+## 💡 Advanced Usage
+
+### Running Your Own Electron Apps
+
+If you have an Electron app, you can use the bundled runtime:
+
+\`\`\`bash
+# Navigate to your Electron app directory
+cd my-electron-app
+
+# Run it with the bundled Electron
+${platform === 'win32' ? 'electron' : 'electron'} .
+\`\`\`
+
+### Using as Node.js Runtime
+
+${platform === 'win32' 
+    ? 'The bundled \`node.cmd\` wrapper can run Node.js scripts:\n\n\`\`\`bash\nnode myscript.js\n\`\`\`' 
+    : 'You can run Node.js scripts with the bundled runtime:\n\n\`\`\`bash\nELECTRON_RUN_AS_NODE=1 node-runner myscript.js\n\`\`\`\n\nOr create an alias:\n\`\`\`bash\nalias node-shine="ELECTRON_RUN_AS_NODE=1 node-runner"\nnode-shine myscript.js\n\`\`\`'}
 
 ## 🛠️ Troubleshooting
 
@@ -634,6 +721,13 @@ Install a C++ compiler (see Prerequisites above).
 
 Test: \`g++ --version\`
 
+### Electron app won't start
+
+Make sure you're using the \`electron\` command, not \`shine\`:
+\`\`\`bash
+electron path/to/app
+\`\`\`
+
 ## 📞 Support
 
 Visit: https://fiana.qzz.io
@@ -643,7 +737,8 @@ Visit: https://fiana.qzz.io
 **Installation**: ${new Date().toLocaleString()}
 **Version**: 1.0.8
 **Platform**: ${platform}
-${hasFullNode ? '**Runtime**: Full Node.js Bundled ✅' : '**Runtime**: System Node.js ⚠️'}
+${hasFullNode ? '**Runtime**: Full Node.js/Electron Bundled ✅' : '**Runtime**: System Node.js ⚠️'}
+**Bundled Tools**: shine, electron, node
 
 Made with ✨ by Fiana-dev
 `;
