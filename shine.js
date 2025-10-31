@@ -5,7 +5,7 @@ const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
 
-const CURRENT_VERSION = '1.1.0';
+const CURRENT_VERSION = '1.1.1';
 const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
 
 // Plugin system
@@ -36,6 +36,12 @@ function loadPlugins() {
 function runUnicorn(code) {
     try {
         let jsCode = code;
+        
+        // Remove single-line comments (# style)
+        jsCode = jsCode.replace(/#[^\n]*/g, '');
+        
+        // Remove multi-line comments (/* */ style)
+        jsCode = jsCode.replace(/\/\*[\s\S]*?\*\//g, '');
         
         // Basic output - handle both quoted strings and variables
         jsCode = jsCode.replace(/twinkle\s+([^;]+);/g, 'console.log("✨ " + $1 + " ✨");');

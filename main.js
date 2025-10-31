@@ -312,7 +312,7 @@ function createPluginsDirectory(installPath) {
         fs.mkdirSync(pluginsDir, { recursive: true });
         
         // ========== FIXED C++ PLUGIN ==========
-        const cppPlugin = `// C++ Plugin for Shine v1.0.2
+        const cppPlugin = `// C++ Plugin for Shine v1.0.3
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -320,7 +320,7 @@ const os = require('os');
 
 module.exports = {
     name: 'cpp-compiler',
-    version: '1.0.2',
+    version: '1.0.3',
     description: 'Compiles and runs C++ files',
     
     init: function() {
@@ -441,12 +441,19 @@ module.exports = {
                 
                 runProcess.on('error', (err) => {
                     console.error('❌ Runtime error:', err.message);
+                    try {
+                        fs.unlinkSync(outputFile);
+                    } catch (e) {}
                     reject(err);
                 });
             });
             
             compileProcess.on('error', (err) => {
-                console.error('❌ Compilation error:', err.message);
+                console.error('❌ Failed to start compiler:', err.message);
+                console.error('');
+                console.error('Make sure the compiler is installed and in your PATH');
+                console.error('Current PATH:', process.env.PATH);
+                console.error('');
                 reject(err);
             });
         });
@@ -456,13 +463,13 @@ module.exports = {
         fs.writeFileSync(path.join(pluginsDir, 'cpp-plugin.js'), cppPlugin);
         
         // ========== FIXED JAVASCRIPT PLUGIN ==========
-        const jsPlugin = `// JavaScript Plugin for Shine v1.0.1
+        const jsPlugin = `// JavaScript Plugin for Shine v1.0.2
 const fs = require('fs');
 const path = require('path');
 
 module.exports = {
     name: 'javascript-runner',
-    version: '1.0.1',
+    version: '1.0.2',
     description: 'Runs JavaScript files',
     
     init: function() {
@@ -477,16 +484,49 @@ module.exports = {
                 console.log(\`✨ Running JavaScript: \${path.basename(filePath)}\`);
                 console.log('─'.repeat(50));
                 
+                // Get absolute path
                 const absolutePath = path.resolve(filePath);
+                
+                // Check if file exists
+                if (!fs.existsSync(absolutePath)) {
+                    throw new Error(\`File not found: \${absolutePath}\`);
+                }
+                
                 const fileDir = path.dirname(absolutePath);
                 
+                // Clear require cache
                 delete require.cache[absolutePath];
                 
                 const originalCwd = process.cwd();
                 process.chdir(fileDir);
                 
                 try {
-                    require(absolutePath);
+                    // Use eval instead of require for better error handling
+                    const Module = require('module');
+                    const vm = require('vm');
+                    
+                    // Create a new module context
+                    const sandbox = {
+                        require: require,
+                        module: { exports: {} },
+                        exports: {},
+                        __filename: absolutePath,
+                        __dirname: fileDir,
+                        console: console,
+                        process: process,
+                        Buffer: Buffer,
+                        setTimeout: setTimeout,
+                        setInterval: setInterval,
+                        clearTimeout: clearTimeout,
+                        clearInterval: clearInterval,
+                        global: global
+                    };
+                    
+                    // Run the code
+                    vm.runInNewContext(code, sandbox, {
+                        filename: absolutePath,
+                        displayErrors: true
+                    });
                     
                     console.log('─'.repeat(50));
                     console.log('✨ JavaScript execution completed!');
