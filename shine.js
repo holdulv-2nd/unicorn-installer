@@ -5,7 +5,7 @@ const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
 
-const CURRENT_VERSION = '1.0.9';
+const CURRENT_VERSION = '1.1.0';
 const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
 
 // Plugin system
