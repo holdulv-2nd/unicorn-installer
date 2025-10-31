@@ -1,7 +1,7 @@
 {
   "name": "unicorn-installer",
-  "version": "1.0.7",
-  "description": "Shine Unicorn cross-platform installer with plugin support",
+  "version": "1.0.8",
+  "description": "Shine Unicorn cross-platform installer with bundled Node.js runtime",
   "main": "main.js",
   "author": "Fiana-dev <hello@fiana.qzz.io>",
   "homepage": "https://fiana.qzz.io",

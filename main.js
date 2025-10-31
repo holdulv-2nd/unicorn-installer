@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 
 const platform = os.platform();
 const homeDir = os.homedir();
@@ -115,45 +115,115 @@ function addToPath(installPath) {
     }
 }
 
-// ⭐ NEW: Bundle Node.js from Electron
-function createNodeWrapper(installPath) {
-    console.log('📦 Bundling Node.js runtime...');
+// Helper function to copy directories recursively
+function copyDirRecursive(source, target) {
+    if (!fs.existsSync(target)) {
+        fs.mkdirSync(target, { recursive: true });
+    }
+    
+    const files = fs.readdirSync(source);
+    
+    files.forEach(file => {
+        const sourcePath = path.join(source, file);
+        const targetPath = path.join(target, file);
+        
+        try {
+            const stat = fs.statSync(sourcePath);
+            
+            if (stat.isDirectory()) {
+                copyDirRecursive(sourcePath, targetPath);
+            } else {
+                fs.copyFileSync(sourcePath, targetPath);
+            }
+        } catch (err) {
+            console.warn(`⚠️  Could not copy ${file}:`, err.message);
+        }
+    });
+}
+
+// ⭐ NEW: Copy entire Electron app folder and rename to "node"
+function copyElectronApp(installPath) {
+    console.log('📦 Bundling full Node.js runtime (Electron)...');
     
     try {
-        if (platform === 'win32') {
-            // Windows: Copy electron.exe as node.exe
-            const nodePath = path.join(installPath, 'node.exe');
-            fs.copyFileSync(process.execPath, nodePath);
-            console.log('✅ Node.js bundled successfully (Windows)');
-        } else {
-            // Unix: Create wrapper script
-            const nodePath = path.join(installPath, 'node');
-            const electronPath = process.execPath;
+        const electronAppPath = process.execPath;
+        const electronDir = path.dirname(electronAppPath);
+        const targetDir = path.join(installPath, 'node'); // Renamed from 'electron' to 'node'
+        
+        // Create target directory
+        fs.mkdirSync(targetDir, { recursive: true });
+        
+        // Copy all files from Electron directory
+        const files = fs.readdirSync(electronDir);
+        
+        files.forEach(file => {
+            // Skip some unnecessary large files to save space
+            if (file === 'swiftshader' || file === 'vk_swiftshader_icd.json') {
+                return;
+            }
             
-            // Create a wrapper that executes like node
-            const wrapperScript = `#!/bin/bash
-exec "${electronPath}" "$@"
-`;
-            fs.writeFileSync(nodePath, wrapperScript, { mode: 0o755 });
-            console.log('✅ Node.js wrapper created successfully (Unix)');
+            const sourcePath = path.join(electronDir, file);
+            const targetPath = path.join(targetDir, file);
+            
+            try {
+                const stat = fs.statSync(sourcePath);
+                
+                if (stat.isDirectory()) {
+                    // Copy directory recursively
+                    copyDirRecursive(sourcePath, targetPath);
+                } else {
+                    // Copy file
+                    fs.copyFileSync(sourcePath, targetPath);
+                }
+            } catch (err) {
+                console.warn(`⚠️  Could not copy ${file}:`, err.message);
+            }
+        });
+        
+        // Rename the main executable to node.exe (Windows) or node (Unix)
+        const originalExeName = path.basename(process.execPath);
+        const originalExePath = path.join(targetDir, originalExeName);
+        const newExeName = platform === 'win32' ? 'node.exe' : 'node';
+        const newExePath = path.join(targetDir, newExeName);
+        
+        if (fs.existsSync(originalExePath) && originalExeName !== newExeName) {
+            try {
+                fs.renameSync(originalExePath, newExePath);
+                console.log(`✅ Renamed ${originalExeName} to ${newExeName}`);
+            } catch (err) {
+                console.warn(`⚠️  Could not rename executable:`, err.message);
+                // If rename fails, try copy
+                fs.copyFileSync(originalExePath, newExePath);
+                fs.unlinkSync(originalExePath);
+            }
         }
+        
+        // Make executable on Unix systems
+        if (platform !== 'win32') {
+            try {
+                fs.chmodSync(newExePath, 0o755);
+            } catch (err) {
+                console.warn('⚠️  Could not set executable permissions:', err.message);
+            }
+        }
+        
+        console.log('✅ Full Node.js runtime bundled successfully');
+        return targetDir;
     } catch (err) {
-        console.error('⚠️  Failed to bundle Node.js:', err.message);
-        console.log('Users will need to install Node.js manually');
+        console.error('⚠️  Failed to bundle Node.js runtime:', err.message);
+        throw err;
     }
 }
 
-function makeTerminalWrapper(runnerPath, installPath) {
-    const nodePath = path.join(installPath, platform === 'win32' ? 'node.exe' : 'node');
+// ⭐ UPDATED: Terminal wrapper to use bundled node
+function makeTerminalWrapper(runnerPath, installPath, nodeDir) {
+    const nodePath = path.join(nodeDir, platform === 'win32' ? 'node.exe' : 'node');
     
     if (platform === 'win32') {
         const wrapperPath = path.join(installPath, 'shine.cmd');
         
-        // Check if bundled Node.js exists, otherwise fall back to system node
-        const nodeCommand = fs.existsSync(nodePath) ? `"${nodePath}"` : 'node';
-        
         fs.writeFileSync(wrapperPath, `@echo off
-${nodeCommand} "${runnerPath}" %*
+"${nodePath}" "${runnerPath}" %*
 if errorlevel 1 (
     echo.
     echo ✨ Error occurred! Press any key to close ✨
@@ -163,10 +233,9 @@ if errorlevel 1 (
     } else {
         // Create Unix wrapper
         const wrapperPath = path.join(installPath, 'shine');
-        const nodeCommand = fs.existsSync(nodePath) ? `"${nodePath}"` : 'node';
         
         fs.writeFileSync(wrapperPath, `#!/bin/bash
-${nodeCommand} "${runnerPath}" "$@"
+"${nodePath}" "${runnerPath}" "$@"
 `, { mode: 0o755 });
     }
 }
@@ -277,7 +346,7 @@ module.exports = {
             if (!compiler) {
                 console.error('❌ C++ compiler not found!');
                 console.error('');
-                console.error('📥 Please install a C++ compiler:');
+                console.error('🔥 Please install a C++ compiler:');
                 console.error('');
                 if (process.platform === 'win32') {
                     console.error('   Windows Options:');
@@ -407,13 +476,13 @@ module.exports = {
 
 function createReadme(installPath) {
     const readmePath = path.join(installPath, 'README.md');
-    const hasNodeBundle = fs.existsSync(path.join(installPath, platform === 'win32' ? 'node.exe' : 'node'));
+    const hasFullNode = fs.existsSync(path.join(installPath, 'node'));
     
     const readmeContent = `# 🦄 Shine - UnicornLang Runner
 
 Welcome to Shine! Your local installation of the Shine UnicornLang runner.
 
-${hasNodeBundle ? '✅ **Node.js is bundled** - No separate installation required!' : '⚠️ **Note:** Node.js must be installed separately to use Shine.'}
+${hasFullNode ? '✅ **Full Node.js runtime bundled** - Completely standalone! No dependencies required!' : '⚠️ **Note:** Using system Node.js runtime.'}
 
 ## 🚀 Quick Start
 
@@ -434,7 +503,7 @@ shine hello.cpp
 
 ## ⚙️ Prerequisites
 
-${hasNodeBundle ? '### ✅ JavaScript Runtime\nNode.js is already included with Shine!\n' : '### Node.js\nDownload from https://nodejs.org/\n'}
+${hasFullNode ? '### ✅ Runtime Environment\nNode.js runtime is already included with Shine! No additional dependencies needed.\n' : '### Node.js Runtime\nUsing system Node.js installation.\n'}
 
 ### For C++ Compilation
 
@@ -509,7 +578,7 @@ repeat 5 times {
 }
 \`\`\`
 
-## 📌 Plugins
+## 🔌 Plugins
 
 ### List Plugins
 \`\`\`bash
@@ -540,12 +609,14 @@ Run with: \`shine test.cpp\` or \`shine hello.js\`
 shine update
 \`\`\`
 
+This will automatically download and install the latest version!
+
 ## 🛠️ Commands
 
 | Command | Description |
 |---------|-------------|
 | \`shine <file>\` | Run a file |
-| \`shine update\` | Check for updates |
+| \`shine update\` | Check and install updates |
 | \`shine plugins\` | List plugins |
 | \`shine help\` | Show help |
 
@@ -570,9 +641,9 @@ Visit: https://fiana.qzz.io
 ---
 
 **Installation**: ${new Date().toLocaleString()}
-**Version**: 1.0.7
+**Version**: 1.0.8
 **Platform**: ${platform}
-${hasNodeBundle ? '**Node.js**: Bundled ✅' : '**Node.js**: External ⚠️'}
+${hasFullNode ? '**Runtime**: Full Node.js Bundled ✅' : '**Runtime**: System Node.js ⚠️'}
 
 Made with ✨ by Fiana-dev
 `;
@@ -581,6 +652,7 @@ Made with ✨ by Fiana-dev
     return readmePath;
 }
 
+// ⭐ UPDATED: Installation function
 async function performInstallation(installPath, win) {
     try {
         if (!installPath) throw new Error("No installation path provided");
@@ -588,15 +660,15 @@ async function performInstallation(installPath, win) {
         const shinePath = path.join(installPath, 'Shine');
         fs.mkdirSync(shinePath, { recursive: true });
 
+        console.log('📦 Bundling complete Node.js runtime...');
+        const nodeDir = copyElectronApp(shinePath);
+
         console.log('📝 Installing Shine runner...');
         const runnerPath = path.join(shinePath, 'shine.js');
         fs.writeFileSync(runnerPath, shineCode);
 
-        // ⭐ Bundle Node.js from Electron
-        createNodeWrapper(shinePath);
-
         console.log('🔧 Creating wrapper scripts...');
-        makeTerminalWrapper(runnerPath, shinePath);
+        makeTerminalWrapper(runnerPath, shinePath, nodeDir);
         
         console.log('🔗 Setting up file associations...');
         associateFiles(shinePath);
@@ -607,10 +679,10 @@ async function performInstallation(installPath, win) {
         console.log('📖 Creating documentation...');
         const readmePath = createReadme(shinePath);
         
-        console.log('🛤️  Adding to PATH...');
+        console.log('🛤️ Adding to PATH...');
         addToPath(shinePath);
 
-        const hasNodeBundle = fs.existsSync(path.join(shinePath, platform === 'win32' ? 'node.exe' : 'node'));
+        const hasFullNode = fs.existsSync(path.join(shinePath, 'node'));
         
         let pathMsg = '';
         if (platform === 'win32') {
@@ -619,7 +691,7 @@ async function performInstallation(installPath, win) {
             pathMsg = '\n\n⚠️ Please restart your terminal or run: source ~/.zshrc (or ~/.bashrc)';
         }
 
-        const message = `✨ Shine installed successfully at ${shinePath}! ✨${hasNodeBundle ? '\n\n✅ Node.js bundled - no separate installation needed!' : '\n\n⚠️ You\'ll need to install Node.js separately.'}${pathMsg}`;
+        const message = `✨ Shine installed successfully at ${shinePath}! ✨${hasFullNode ? '\n\n✅ Full Node.js runtime bundled - completely standalone!' : '\n\n⚠️ Using system Node.js runtime.'}${pathMsg}`;
         
         if (hideFlag) {
             console.log(message);

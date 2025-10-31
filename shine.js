@@ -5,7 +5,7 @@ const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
 
-const CURRENT_VERSION = '1.0.7';
+const CURRENT_VERSION = '1.0.8';
 const REPFAL_BASE = 'https://repfal.betaflare.workers.dev';
 
 // Plugin system
@@ -235,7 +235,6 @@ async function shineUpdate() {
         }
 
         console.log(`✨ Downloading ${fileName}...`);
-        console.log(`📥 From: ${REPFAL_BASE}${platformFile}`);
         
         await downloadFile(`${REPFAL_BASE}${platformFile}`, destPath);
 
@@ -253,20 +252,96 @@ async function shineUpdate() {
 
         console.log('🦄 Update downloaded successfully!');
         console.log(`📦 File: ${destPath}`);
+        console.log('\n🚀 Starting auto-installation...\n');
         
-        if (platform === 'win32') {
-            console.log('\n💡 To install the update:');
-            console.log(`   ${destPath}`);
-            console.log('\n💡 To auto-update (silent install):');
-            console.log(`   "${destPath}" -hide`);
-        } else {
-            console.log('\n💡 To install the update:');
-            console.log(`   chmod +x "${destPath}" && "${destPath}"`);
+        // ⭐ AUTO-INSTALL THE UPDATE
+        try {
+            if (platform === 'win32') {
+                // Windows: Run installer with -hide flag for silent update
+                console.log('💫 Installing update silently...');
+                const installer = spawn(destPath, ['-hide'], {
+                    detached: true,
+                    stdio: 'ignore'
+                });
+                installer.unref();
+                
+                console.log('✅ Update installer launched!');
+                console.log('🔄 The installer will update Shine automatically.');
+                console.log('💡 You can continue using the terminal.');
+                
+                // Wait a moment for installer to start
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+            } else if (platform === 'darwin') {
+                // macOS: Mount DMG and run installer
+                console.log('💫 Mounting installer...');
+                const { execSync } = require('child_process');
+                
+                try {
+                    // Make executable
+                    fs.chmodSync(destPath, 0o755);
+                    
+                    // Open the DMG (user will need to drag to Applications)
+                    execSync(`open "${destPath}"`, { stdio: 'inherit' });
+                    
+                    console.log('✅ Installer opened!');
+                    console.log('💡 Please drag Shine to Applications to complete the update.');
+                    
+                } catch (err) {
+                    console.error('⚠️  Could not open installer automatically');
+                    console.log('💡 Please run manually:');
+                    console.log(`   open "${destPath}"`);
+                }
+                
+            } else {
+                // Linux: Install based on file type
+                console.log('💫 Installing update...');
+                const { execSync } = require('child_process');
+                
+                try {
+                    fs.chmodSync(destPath, 0o755);
+                    
+                    if (platformFile.includes('.deb')) {
+                        console.log('📦 Installing .deb package...');
+                        execSync(`sudo dpkg -i "${destPath}"`, { stdio: 'inherit' });
+                        console.log('✅ Update installed successfully!');
+                    } else {
+                        // AppImage - just run it with -hide flag
+                        console.log('🚀 Launching installer...');
+                        const installer = spawn(destPath, ['-hide'], {
+                            detached: true,
+                            stdio: 'ignore'
+                        });
+                        installer.unref();
+                        
+                        console.log('✅ Update installer launched!');
+                        console.log('🔄 The installer will update Shine automatically.');
+                    }
+                } catch (err) {
+                    console.error('⚠️  Could not install automatically');
+                    console.log('💡 Please run manually:');
+                    if (platformFile.includes('.deb')) {
+                        console.log(`   sudo dpkg -i "${destPath}"`);
+                    } else {
+                        console.log(`   chmod +x "${destPath}" && "${destPath}"`);
+                    }
+                }
+            }
+            
+        } catch (err) {
+            console.error('⚠️  Auto-installation failed:', err.message);
+            console.log('\n💡 To install manually:');
+            
+            if (platform === 'win32') {
+                console.log(`   "${destPath}" -hide`);
+            } else {
+                console.log(`   chmod +x "${destPath}" && "${destPath}"`);
+            }
         }
 
     } catch (err) {
         console.error('❌ Update failed:', err.message);
-        console.log('💡 You may need to update manually contact support');
+        console.log('💡 You may need to update manually or contact support');
         process.exit(1);
     }
 }
@@ -281,7 +356,7 @@ Usage:
   shine <file.unicorn>     Run a UnicornLang file
   shine <file.js>          Run a JavaScript file (if plugin loaded)
   shine <file.cpp>         Compile and run C++ file (if plugin loaded)
-  shine update             Check and download updates
+  shine update             Check, download, and install updates automatically
   shine help               Show this help message
   shine plugins            List loaded plugins
 
@@ -289,7 +364,7 @@ Examples:
   shine myprogram.unicorn
   shine hello.js
   shine test.cpp
-  shine update
+  shine update             # Fully automatic update!
     `);
 }
 
